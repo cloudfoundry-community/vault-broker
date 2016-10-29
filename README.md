@@ -7,7 +7,7 @@ fine people over at [Hashicorp][hashicorp].  If you work with
 met the [Vault BOSH release][release] over at
 [cloudfoundry-community][cfc].
 
-Wouldn't it be awesome if you could use Vault form your Cloud
+Wouldn't it be awesome if you could use Vault from your Cloud
 Foundry applications?
 
 Now you can!
