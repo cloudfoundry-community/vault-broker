@@ -133,7 +133,11 @@ func (vault *VaultBroker) Provision(instanceID string, details brokerapi.Provisi
 			Rules: fmt.Sprintf(`
 path "secret/%s" {
   capabilities = ["create", "read", "update", "delete", "list", "sudo"]
-}`, instanceID),
+}
+
+path "secret/%s/*" {
+  capabilities = ["create", "read", "update", "delete", "list", "sudo"]
+}`, instanceID, instanceID),
 		},
 	)
 	if err != nil {
