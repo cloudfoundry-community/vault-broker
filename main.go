@@ -280,7 +280,7 @@ func (vault *VaultBroker) Unbind(instanceID, bindingID string, details brokerapi
 	}
 
 	log.Printf("[unbind %s / %s] revoking token '%s'", instanceID, bindingID, secret["token"])
-	res, err = vault.Do("PUT",
+	res, err = vault.Do("POST",
 		fmt.Sprintf("/v1/auth/token/revoke/%s", secret["token"]), nil)
 	if err != nil {
 		log.Printf("[unbind %s / %s] error: %s", instanceID, bindingID, err)
