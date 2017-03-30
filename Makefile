@@ -1,6 +1,9 @@
 build:
 	go build .
 
+test:
+	./t/basic
+
 push:
 	cf push vault-broker -m 128M -k 256M --no-start
 	cf set-env vault-broker VAULT_ADDR "$(VAULT_ADDR)"

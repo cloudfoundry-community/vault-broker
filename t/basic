@@ -1,0 +1,211 @@
+#!/bin/bash
+
+rm -rf t/tmp; mkdir -p t/tmp
+export HOME=${PWD}/t/tmp
+
+uuid() {
+	uuidgen | tr A-Z a-z
+}
+
+TESTS=0
+FAILS=0
+ok() {
+	echo "[ ok ] $@"
+	TESTS=$(( TESTS + 1 ))
+}
+fail() {
+	echo "[FAIL] $@"
+	FAILS=$(( FAILS + 1 ))
+	TESTS=$(( TESTS + 1 ))
+}
+diag() {
+	echo $*
+}
+
+VAULT_PID=
+BROKER_PID=
+
+BROKER_GUID=$(uuid)
+BROKER_SERVIER_NAME=vault
+AUTH_USERNAME=admin
+AUTH_PASSWORD=sekrit
+BROKER_PORT=8242
+BROKER_URL=http://127.0.0.1:${BROKER_PORT}
+export BROKER_GUID BROKER_SERVICE_NAME
+export AUTH_USERNAME AUTH_PASSWORD
+export PORT=${BROKER_PORT}
+
+VAULT_ADDRESS=127.0.0.1:8241
+VAULT_ADDR=http://${VAULT_ADDRESS}
+VAULT_ADVERTISE_ADDR=${VAULT_ADDR}
+VAULT_TOKEN=$(uuid)
+export VAULT_TOKEN VAULT_ADDR VAULT_ADVERTISE_ADDR
+
+dump_logs() {
+	(echo "------------------------------------"
+	 for log in vault broker curl; do
+		if [[ ! -f t/tmp/${log}.log ]]; then
+			echo "!! skipping t/tmp/${log}.log (enoent...)"
+		else
+			echo "$ cat t/tmp/${log}.log"
+			cat t/tmp/${log}.log
+		fi
+		echo
+	 done
+	 echo "------------------------------------"
+	 echo) >&2
+}
+
+OK=
+atexit() {
+	set +ex
+	if [[ -z $OK ]]; then
+		dump_logs
+	fi
+
+	if [[ -n ${VAULT_PID} ]]; then
+		kill -INT ${VAULT_PID}
+	fi
+	if [[ -n ${BROKER_PID} ]]; then
+		kill -INT ${BROKER_PID}
+	fi
+}
+trap "atexit" INT QUIT TERM EXIT
+
+bail() {
+	(echo $* ; echo "aborting..." ; echo
+	 dump_logs
+	) >&2
+	exit 2
+}
+
+run_vault() {
+	vault server \
+	        -dev \
+	        -dev-root-token-id="${VAULT_TOKEN}" \
+	        -dev-listen-address="${VAULT_ADDRESS}" \
+	        > t/tmp/vault.log 2>&1 &
+	VAULT_PID=$!
+
+	sleep 1
+	rm -f ${HOME}/.saferc
+	safe target -k tests ${VAULT_ADDR}
+	echo "${VAULT_TOKEN}" | safe auth token
+	safe write secret/handshake knock=knock
+	safe check secret/handshake || bail "failed to setup vault"
+	safe tree
+}
+
+run_broker() {
+	./vault-broker > t/tmp/broker.log 2>&1 &
+	BROKER_PID=$!
+	sleep 1
+}
+
+http() {
+	method=${1?http() requires a METHOD argument} ; shift
+	url=${1?http() requires a URL argument}       ; shift
+
+	echo >>t/tmp/curl.log ":: ${method} ${BROKER_URL}${url}"
+	curl --fail -vv -u ${AUTH_USERNAME}:${AUTH_PASSWORD} -X ${method} ${BROKER_URL}${url} "$@" 2>>t/tmp/curl.log \
+		|| bail "curl ${method} ${url} FAILED"
+	echo >>t/tmp/curl.log
+}
+
+echo >&2 "starting up vault..."
+run_vault
+echo >&2 "vault is up and running..."
+
+echo >&2 "spinning up vault-broker..."
+run_broker
+echo >&2 "vault-broker is up and running..."
+
+INST_1=$(uuid)
+BIND_1_1=$(uuid)
+
+set -e
+http GET /v2/catalog | tee t/tmp/catalog.json | jq -r .
+
+http PUT /v2/service_instances/${INST_1} -d '{
+  "organization_guid" : "'$(uuid)'",
+  "space_guid"        : "'$(uuid)'",
+  "service_id"        : "'${BROKER_GUID}'",
+  "plan_id"           : "'${BROKER_GUID}'.shared"
+}' | tee t/tmp/provision.json | jq -r .
+
+http PUT /v2/service_instances/${INST_1}/service_bindings/${BIND_1_1} -d '{
+  "service_id"        : "'${BROKER_GUID}'",
+  "plan_id"           : "'${BROKER_GUID}'.shared"
+}' | tee t/tmp/bind.json | jq -r .
+got_vault=$(jq -r .credentials.vault <t/tmp/bind.json)
+got_token=$(jq -r .credentials.token <t/tmp/bind.json)
+got_root=$( jq -r .credentials.root  <t/tmp/bind.json)
+if [[ ${got_vault} != "${VAULT_ADVERTISE_ADDR}" ]]; then
+	fail "vault-broker did not use the VAULT_ADVERTISE_ADDR when giving out credentials"
+	diag "      expected '${got_vault}'"
+	diag "      to equal '${VAULT_ADVERTISE_ADDR}'"
+	diag
+else
+	ok "vault-broker gives out VAULT_ADVERTISE_ADDR instead of VAULT_ADDR"
+fi
+if [[ -z ${got_token} ]]; then
+	fail "vault-broker did not grant us a vault token when we bound the service"
+else
+	ok "vault-broker granted us a vault token when we bound the service"
+fi
+
+safe target -k inst1 ${got_vault}
+echo "${got_token}" | safe auth token
+safe write ${got_root}/test1 key=value
+if safe exists ${got_root}/test1:key; then
+	ok "able to write to the root path using the supplied token"
+else
+	fail "unable to write to the root path using the supplied token"
+fi
+
+got_secret=$(safe read ${got_root}/test1:key)
+if [[ "${got_secret}" != "value" ]]; then
+	fail "vault did not store our secret properly..."
+	diag "      expected '${got_secret}'"
+	diag "      to equal 'value'"
+else
+	ok "stored and retrieved a secret properly using generated credentials"
+fi
+
+http DELETE /v2/service_instances/${INST_1}/service_bindings/${BIND_1_1}
+if safe exists ${got_root}/test1:key; then
+	fail "vault broker did not revoke our root token after the service was unbound"
+else
+	ok "vault broker revokes root token after the service is unbound"
+fi
+
+set +e
+
+if kill -0 ${BROKER_PID} >/dev/null 2>&1; then
+	echo >&2 "shutting down vault-broker..."
+	kill -TERM ${BROKER_PID}
+	wait ${BROKER_PID}
+fi
+BROKER_PID=
+
+if kill -0 ${VAULT_PID} >/dev/null 2>&1; then
+	echo >&2 "shutting down vault..."
+	kill -INT ${VAULT_PID}
+	wait ${VAULT_PID}
+fi
+VAULT_PID=
+
+ps -ef | grep vaul[t]
+
+echo >&2 "done"
+OK=1
+echo
+if [[ $FAILS -gt 0 ]]; then
+	echo "$FAILS / $TESTS tests failed"
+	exit 1
+else
+	echo "ALL TESTS PASSED"
+	exit 0
+fi
+
+# vim:ft=bash
