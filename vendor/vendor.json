@@ -1,0 +1,50 @@
+{
+	"comment": "",
+	"ignore": "test",
+	"package": [
+		{
+			"checksumSHA1": "iIUYZyoanCQQTUaWsu8b+iOSPt4=",
+			"comment": "v1.1-2-ga8d44e7",
+			"path": "github.com/gorilla/context",
+			"revision": "a8d44e7d8e4d532b6a27a02dd82abb31cc1b01bd"
+		},
+		{
+			"checksumSHA1": "/WoZGh9L9hFOcrU9d7rAeFPDy1U=",
+			"comment": "v1.1-7-g9c19ed5",
+			"path": "github.com/gorilla/mux",
+			"revision": "9c19ed558d5df4da88e2ade9c8940d742aef0e7e"
+		},
+		{
+			"checksumSHA1": "xN14ZoFcgefABp24aowYtQVMDsc=",
+			"comment": "v1.0-11-gc55201b",
+			"path": "github.com/pborman/uuid",
+			"revision": "c55201b036063326c5b1b89ccfe45a184973d073"
+		},
+		{
+			"checksumSHA1": "Vnx7QNbxjghzJYXnaG/lddaw8oM=",
+			"path": "github.com/pivotal-cf/brokerapi",
+			"revision": "3abc5864a39f7b204e1daaa0677433f8d4568f81"
+		},
+		{
+			"checksumSHA1": "4yHEcDRxN5sqr5UDFs3qr0B4lwA=",
+			"path": "github.com/pivotal-cf/brokerapi/auth",
+			"revision": "3abc5864a39f7b204e1daaa0677433f8d4568f81"
+		},
+		{
+			"checksumSHA1": "eV6MKMzdW9Uimp4xT/KfLz2dB1c=",
+			"path": "github.com/pivotal-cf/brokerapi/fakes",
+			"revision": "3abc5864a39f7b204e1daaa0677433f8d4568f81"
+		},
+		{
+			"checksumSHA1": "x8vUU+B8SayhUWxirNbUjq7Hlns=",
+			"path": "github.com/pivotal-golang/lager",
+			"revision": "7639e31ce6622c55c15aa64144b85d5f4873d127"
+		},
+		{
+			"checksumSHA1": "YyAQLyiR8qkamSJThkVAYHqDIR0=",
+			"path": "github.com/pivotal-golang/lager/lagertest",
+			"revision": "7639e31ce6622c55c15aa64144b85d5f4873d127"
+		}
+	],
+	"rootPath": "github.com/cloudfoundry-community/vault-broker"
+}
