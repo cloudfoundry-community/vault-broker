@@ -8,4 +8,4 @@ cd ${GOPATH}/src/${MODULE}
 
 
 go vet $(go list ./... | grep -v vendor)
-go test -v ./...
+go test -v .
