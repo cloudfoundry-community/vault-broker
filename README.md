@@ -111,9 +111,9 @@ variables:
     separated by a comma followed by a space.  By default, no tags
     are configured.
   - **$AUTH_USERNAME** - The username for authenticating
-    interaction with Cloud Foundry.  Defaults to `vault`.
+    with Cloud Foundry.  Defaults to `vault`.
   - **$AUTH_PASSWORD** - The password for authenticating
-    interaction with Cloud Foundry.  Also defaults to `vault`.
+    with Cloud Foundry.  Also defaults to `vault`.
   - **$VAULT_ADDR** - The address to use when accessing the Vault
     to set up new policies and manage provisioned services.  This
     variable is **required**

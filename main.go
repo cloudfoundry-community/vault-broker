@@ -32,6 +32,8 @@ var (
 	BackendPublic   string
 	BackendToken    string
 	BackendInsecure bool
+
+	Version string
 )
 
 type Credentials struct {
@@ -311,8 +313,94 @@ func (vault *VaultBroker) Update(instanceID string, details brokerapi.UpdateDeta
 	return false, fmt.Errorf("not implemented")
 }
 
+func usage(rc int) {
+	version()
+	fmt.Printf(`USAGE: vault-broker [-h|-v]
+
+Options:
+
+  -h, --help     Print this help screen and exit.
+  -v, --version  Print the version and exit.
+
+Environment Variables:
+
+  BROKER_GUID    GUID to use when registering the broker with Cloud Foundry
+                 Defaults to 'f89443a4-ae71-49b0-b726-23ee9c98ae6d'
+
+  SERVICE_NAME   Name of the service, as shown in the marketplace.
+                 Defaults to 'vault'
+
+  SERVICE_DESC   A description of the service, also for the marketplace.
+                 Defaults to 'Vault Secure Storage'
+
+  SERVICE_TAGS   A set of tags for the service, each separated by a comma
+                 followed by a space.  By default, no tags are configured.
+
+  AUTH_USERNAME  The username for authenticating with Cloud Foundry.
+                 Defaults to 'vault'.
+
+  AUTH_PASSWORD  The password for authenticating with Cloud Foundry.
+                 Also defaults to 'vault'.
+
+ *VAULT_ADDR     The address to use when accessing the Vault to set up new
+                 policies and manage provisioned services.
+                 This variable is REQUIRED.
+
+  VAULT_ADVERTISE_ADDR
+                 The address to hand out to bound applications, along with
+                 their credentials.  This defaults to '$VAULT_ADDR', but can
+                 be set separately if you need or want applications to access
+                 the Vault via DNS, or over a load balancer.
+
+ *VAULT_TOKEN    The token that the service broker will use when interacting
+                 with the Vault.  This variable is REQUIRED, and you probably
+                 want to set it to a root token.
+
+  VAULT_SKIP_VERIFY
+                 Instructs the broker to ignore SSL/TLS certificate problems
+                 (self-signedness, domain mismatch, expiration, etc.).
+                 Set this at your own risk.  Note that this will not be
+                 propagated to bound applications.
+`)
+	os.Exit(rc)
+}
+
+func version() {
+	v := "(development version)"
+	if Version != "" {
+		v = fmt.Sprintf("v%s", Version)
+	}
+	fmt.Printf("vault-broker %s\n", v)
+}
+
 func main() {
 	ok := true
+
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "-h":
+			usage(0)
+		case "-?":
+			usage(0)
+		case "--help":
+			usage(0)
+		case "help":
+			usage(0)
+
+		case "-v":
+			version()
+			os.Exit(0)
+		case "--version":
+			version()
+			os.Exit(0)
+		case "version":
+			version()
+			os.Exit(0)
+
+		default:
+			usage(1)
+		}
+	}
 
 	BrokerGUID = os.Getenv("BROKER_GUID")
 	if BrokerGUID == "" {
