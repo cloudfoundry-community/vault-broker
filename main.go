@@ -72,7 +72,7 @@ type VaultBroker struct {
 	HTTP *http.Client
 
 	Lock   sync.Mutex
-	Tokens []string
+	Tokens map[string]bool
 }
 
 func (vault *VaultBroker) NewRequest(method, url string, data interface{}) (*http.Request, error) {
@@ -175,7 +175,7 @@ func (vault *VaultBroker) Scan() error {
 			}
 
 			if token, ok := secret["token"]; ok {
-				vault.Tokens = append(vault.Tokens, token)
+				vault.Tokens[token] = true
 			}
 		}
 	}
@@ -198,7 +198,7 @@ func (vault *VaultBroker) RenewOnce() {
 	vault.Lock.Lock()
 	defer vault.Lock.Unlock()
 
-	for _, token := range vault.Tokens {
+	for token := range vault.Tokens {
 		res, err := vault.Do("POST", fmt.Sprintf("/v1/auth/token/renew/%s", token), nil)
 		if err != nil {
 			log.Printf("[renew %s] error: %s", token, err)
@@ -255,7 +255,7 @@ path "secret/%s/*" {
 		log.Printf("[provision %s] error: %s", instanceID, err)
 		return spec, err
 	}
-	if res.StatusCode != 204 {
+	if res.StatusCode != 204 && res.StatusCode != 200 {
 		log.Printf("[provision %s] error: vault returned a %s", instanceID, res.Status)
 		return spec, fmt.Errorf("Received %s from Vault", res.Status)
 	}
@@ -346,7 +346,7 @@ func (vault *VaultBroker) Bind(instanceID, bindingID string, details brokerapi.B
 	}
 
 	vault.Lock.Lock()
-	vault.Tokens = append(vault.Tokens, token)
+	vault.Tokens[token] = true
 	vault.Lock.Unlock()
 
 	log.Printf("[bind %s / %s] success", instanceID, bindingID)
@@ -405,6 +405,10 @@ func (vault *VaultBroker) Unbind(instanceID, bindingID string, details brokerapi
 		log.Printf("[unbind %s / %s] error: vault returned a %s", instanceID, bindingID, res.Status)
 		return fmt.Errorf("Received %s from Vault", res.Status)
 	}
+
+	vault.Lock.Lock()
+	delete(vault.Tokens, secret["token"])
+	vault.Lock.Unlock()
 
 	log.Printf("[unbind %s / %s] success", instanceID, bindingID)
 	return nil
@@ -604,6 +608,7 @@ func main() {
 				return nil
 			},
 		},
+		Tokens: make(map[string]bool),
 	}
 
 	vault.Scan()
