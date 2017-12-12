@@ -1,0 +1,8 @@
+#!/bin/bash
+
+export PORT=3131
+export VAULT_ADDR=http://127.0.0.1:8282
+export VAULT_TOKEN=46518a51-51b2-44ff-b1b0-069534493eec
+export VAULT_REFRESH_INTERVAL=1
+
+./vault-broker

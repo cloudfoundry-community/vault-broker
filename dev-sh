@@ -1,0 +1,7 @@
+#!/bin/bash
+
+export SB_BROKER_URL=http://127.0.0.1:3131
+export SB_BROKER_USERNAME=vault
+export SB_BROKER_PASSWORD=vault
+echo "dropping to a shell with appropriate env vars set"
+/bin/bash
