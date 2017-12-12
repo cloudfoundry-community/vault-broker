@@ -94,7 +94,11 @@ func (vault *VaultBroker) Do(method, url string, data interface{}) (*http.Respon
 	}
 
 	req.Header.Add("X-Vault-Token", BackendToken)
-	return vault.HTTP.Do(req)
+	res, err := vault.HTTP.Do(req)
+	if err != nil || res.StatusCode == 503 {
+		return res, fmt.Errorf("Vault is sealed")
+	}
+	return res, nil
 }
 
 func (vault *VaultBroker) List(path string) ([]string, error) {
