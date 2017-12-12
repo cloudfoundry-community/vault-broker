@@ -9,7 +9,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pborman/uuid"
@@ -33,6 +35,7 @@ var (
 	BackendPublic   string
 	BackendToken    string
 	BackendInsecure bool
+	BackendRefresh  int
 
 	Version string
 )
@@ -67,6 +70,9 @@ func ReadSecret(in io.Reader) (map[string]string, error) {
 
 type VaultBroker struct {
 	HTTP *http.Client
+
+	Lock   sync.Mutex
+	Tokens []string
 }
 
 func (vault *VaultBroker) NewRequest(method, url string, data interface{}) (*http.Request, error) {
@@ -91,6 +97,31 @@ func (vault *VaultBroker) Do(method, url string, data interface{}) (*http.Respon
 	return vault.HTTP.Do(req)
 }
 
+func (vault *VaultBroker) List(path string) ([]string, error) {
+	res, err := vault.Do("GET", fmt.Sprintf("%s?list=1", path), nil)
+	if err != nil {
+		return nil, err
+	}
+	if res.StatusCode == 404 {
+		return nil, nil
+	}
+	if res.StatusCode != 200 {
+		return nil, fmt.Errorf("Received %s from Vault", res.Status)
+	}
+
+	b, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var r struct{ Data struct{ Keys []string } }
+	if err = json.Unmarshal(b, &r); err != nil {
+		return nil, err
+	}
+
+	return r.Data.Keys, nil
+}
+
 type TokenCreateRequest struct {
 	ID              string   `json:"id,omitempty"`
 	DisplayName     string   `json:"display_name"`
@@ -101,6 +132,80 @@ type TokenCreateRequest struct {
 
 type PolicyCreateRequest struct {
 	Rules string `json:"rules"`
+}
+
+func (vault *VaultBroker) Scan() error {
+	instances, err := vault.List("/v1/secret/acct")
+	if err != nil {
+		log.Printf("[scan] error: %s", err)
+		return err
+	}
+
+	for _, inst := range instances {
+		if !strings.HasSuffix(inst, "/") {
+			continue
+		}
+		instanceID := strings.TrimSuffix(inst, "/")
+		bindings, err := vault.List(fmt.Sprintf("/v1/secret/acct/%s", instanceID))
+		if err != nil {
+			log.Printf("[scan %s] error: %s", instanceID, err)
+			continue
+		}
+
+		for _, bind := range bindings {
+			if strings.HasSuffix(bind, "/") {
+				continue
+			}
+			bindingID := strings.TrimSuffix(bind, "/")
+
+			res, err := vault.Do("GET", fmt.Sprintf("/v1/secret/acct/%s/%s", instanceID, bindingID), nil)
+			if err != nil {
+				log.Printf("[scan %s/%s] error: %s", instanceID, bindingID, err)
+				continue
+			}
+
+			secret, err := ReadSecret(res.Body)
+			if err != nil {
+				log.Printf("[scan %s/%s] error: %s", instanceID, bindingID, err)
+				continue
+			}
+
+			if token, ok := secret["token"]; ok {
+				vault.Tokens = append(vault.Tokens, token)
+			}
+		}
+	}
+
+	log.Printf("[scan] found %d tokens to renew", len(vault.Tokens))
+	return nil
+}
+
+func (vault *VaultBroker) RenewTokens(interval int) {
+	log.Printf("[renew] tokens will be renewed every %d minutes...", interval)
+	t := time.Tick(time.Duration(interval) * time.Minute)
+	vault.RenewOnce()
+
+	for _ = range t {
+		vault.RenewOnce()
+	}
+}
+
+func (vault *VaultBroker) RenewOnce() {
+	vault.Lock.Lock()
+	defer vault.Lock.Unlock()
+
+	for _, token := range vault.Tokens {
+		res, err := vault.Do("POST", fmt.Sprintf("/v1/auth/token/renew/%s", token), nil)
+		if err != nil {
+			log.Printf("[renew %s] error: %s", token, err)
+			continue
+		}
+		if res.StatusCode != 200 {
+			log.Printf("[renew %s] error: received %s from Vault", token, res.Status)
+			continue
+		}
+		log.Printf("[renew %s] renewed token successfully.", token)
+	}
 }
 
 func (vault *VaultBroker) Services() []brokerapi.Service {
@@ -175,30 +280,18 @@ func (vault *VaultBroker) Deprovision(instanceID string, details brokerapi.Depro
 	var rm func(string)
 	rm = func(path string) {
 		log.Printf("[deprovision %s] removing secret at %s", instanceID, path)
-		res, err := vault.Do("DELETE", path, nil)
+		_, err := vault.Do("DELETE", path, nil)
 		if err != nil {
 			log.Printf("[deprovision %s] unable to delete %s: %s", instanceID, path, err)
 		}
 
-		res, err = vault.Do("GET", fmt.Sprintf("%s?list=1", path), nil)
+		keys, err := vault.List(path)
 		if err != nil {
 			log.Printf("[deprovision %s] unable to list %s: %s", instanceID, path, err)
 			return
 		}
 
-		b, err := ioutil.ReadAll(res.Body)
-		if err != nil {
-			log.Printf("[deprovision %s] unable to list %s: %s", instanceID, path, err)
-			return
-		}
-
-		var r struct{ Data struct{ Keys []string } }
-		if err = json.Unmarshal(b, &r); err != nil {
-			log.Printf("[deprovision %s] unable to list %s: %s", instanceID, path, err)
-			return
-		}
-
-		for _, sub := range r.Data.Keys {
+		for _, sub := range keys {
 			rm(fmt.Sprintf("%s/%s", path, strings.TrimSuffix(sub, "/")))
 		}
 	}
@@ -247,6 +340,10 @@ func (vault *VaultBroker) Bind(instanceID, bindingID string, details brokerapi.B
 		log.Printf("[bind %s / %s] error: vault returned a %s", instanceID, bindingID, res.Status)
 		return binding, fmt.Errorf("Received %s from Vault", res.Status)
 	}
+
+	vault.Lock.Lock()
+	vault.Tokens = append(vault.Tokens, token)
+	vault.Lock.Unlock()
 
 	log.Printf("[bind %s / %s] success", instanceID, bindingID)
 	binding.Credentials = Credentials{
@@ -362,6 +459,12 @@ Environment Variables:
                  (self-signedness, domain mismatch, expiration, etc.).
                  Set this at your own risk.  Note that this will not be
                  propagated to bound applications.
+
+  VAULT_REFRESH_INTERVAL
+                 The Vault Broker regularly refreshes auth tokens it has
+                 given to bound applications, so that they can continue to
+                 use tokens without worrying about leases or TTLs.  This sets
+                 the time (in minutes) between refresh attempts.
 `)
 	os.Exit(rc)
 }
@@ -458,6 +561,17 @@ func main() {
 		BackendInsecure = true
 	}
 
+	BackendRefresh = 30
+	if s := os.Getenv("VAULT_REFRESH_INTERVAL"); s != "" {
+		v, err := strconv.ParseInt(s, 10, 64)
+		if err != nil || v <= 0 {
+			fmt.Fprintf(os.Stderr, "Invalid VAULT_REFRESH_INTERVAL value (%s); must be a non-zero, positive number or minutes", s)
+			ok = false
+		} else {
+			BackendRefresh = int(v)
+		}
+	}
+
 	if !ok {
 		fmt.Fprintf(os.Stderr, "Errors encountered during startup.\n")
 		os.Exit(1)
@@ -469,26 +583,31 @@ func main() {
 	}
 	bind := fmt.Sprintf(":%s", port)
 
-	log.Printf("Vault Service Broker listening on %s", bind)
-	http.Handle("/", brokerapi.New(
-		&VaultBroker{
-			HTTP: &http.Client{
-				Transport: &http.Transport{
-					TLSClientConfig: &tls.Config{
-						InsecureSkipVerify: BackendInsecure,
-					},
-					DisableKeepalives: true,
+	vault := &VaultBroker{
+		HTTP: &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: BackendInsecure,
 				},
-				Timeout: 5 * time.Second,
-				CheckRedirect: func(req *http.Request, via []*http.Request) error {
-					if len(via) > 10 {
-						return fmt.Errorf("stopped after 10 redirects")
-					}
-					req.Header.Add("X-Vault-Token", BackendToken)
-					return nil
-				},
+				DisableKeepAlives: true,
+			},
+			Timeout: 5 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) > 10 {
+					return fmt.Errorf("stopped after 10 redirects")
+				}
+				req.Header.Add("X-Vault-Token", BackendToken)
+				return nil
 			},
 		},
+	}
+
+	vault.Scan()
+	go vault.RenewTokens(BackendRefresh)
+
+	log.Printf("Vault Service Broker listening on %s", bind)
+	http.Handle("/", brokerapi.New(
+		vault,
 		lager.NewLogger("vault-broker"),
 		brokerapi.BrokerCredentials{
 			Username: AuthUsername,

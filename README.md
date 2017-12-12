@@ -129,6 +129,8 @@ variables:
     certificate problems (self-signedness, domain mismatch,
     expiration, etc.).  Set this at your own risk.  Note that this
     will not be propagated to bound applications.
+  - **VAULT_REFRESH_INTERVAL** - How often, in minutes, should the
+    broker renew tokens it has issued.  Defaults to 30 (minutes).
 
 
 [vault]:     https://vaultproject.io
