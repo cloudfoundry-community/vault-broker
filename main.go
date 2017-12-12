@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/pborman/uuid"
 	"github.com/pivotal-cf/brokerapi"
@@ -476,7 +477,9 @@ func main() {
 					TLSClientConfig: &tls.Config{
 						InsecureSkipVerify: BackendInsecure,
 					},
+					DisableKeepalives: true,
 				},
+				Timeout: 5 * time.Second,
 				CheckRedirect: func(req *http.Request, via []*http.Request) error {
 					if len(via) > 10 {
 						return fmt.Errorf("stopped after 10 redirects")
