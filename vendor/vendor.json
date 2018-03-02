@@ -15,6 +15,12 @@
 			"revision": "9c19ed558d5df4da88e2ade9c8940d742aef0e7e"
 		},
 		{
+			"checksumSHA1": "0zh8BzWlmxf6Sh76Qn3b+maOOKg=",
+			"path": "github.com/jhunt/go-log",
+			"revision": "ddc1e3b8ed3044efd4d4cf00032e9d42f63a9afb",
+			"revisionTime": "2017-10-24T03:28:03Z"
+		},
+		{
 			"checksumSHA1": "xN14ZoFcgefABp24aowYtQVMDsc=",
 			"comment": "v1.0-11-gc55201b",
 			"path": "github.com/pborman/uuid",

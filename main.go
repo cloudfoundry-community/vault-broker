@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -17,6 +16,7 @@ import (
 	"github.com/pborman/uuid"
 	"github.com/pivotal-cf/brokerapi"
 	"github.com/pivotal-golang/lager"
+	"github.com/jhunt/go-log"
 )
 
 var (
@@ -144,7 +144,7 @@ type PolicyCreateRequest struct {
 func (vault *VaultBroker) Scan() error {
 	instances, err := vault.List("/v1/secret/acct")
 	if err != nil {
-		log.Printf("[scan] error: %s", err)
+		log.Errorf("[scan] error: %s", err)
 		return err
 	}
 
@@ -155,7 +155,7 @@ func (vault *VaultBroker) Scan() error {
 		instanceID := strings.TrimSuffix(inst, "/")
 		bindings, err := vault.List(fmt.Sprintf("/v1/secret/acct/%s", instanceID))
 		if err != nil {
-			log.Printf("[scan %s] error: %s", instanceID, err)
+			log.Errorf("[scan %s] error: %s", instanceID, err)
 			continue
 		}
 
@@ -167,13 +167,13 @@ func (vault *VaultBroker) Scan() error {
 
 			res, err := vault.Do("GET", fmt.Sprintf("/v1/secret/acct/%s/%s", instanceID, bindingID), nil)
 			if err != nil {
-				log.Printf("[scan %s/%s] error: %s", instanceID, bindingID, err)
+				log.Errorf("[scan %s/%s] error: %s", instanceID, bindingID, err)
 				continue
 			}
 
 			secret, err := ReadSecret(res.Body)
 			if err != nil {
-				log.Printf("[scan %s/%s] error: %s", instanceID, bindingID, err)
+				log.Errorf("[scan %s/%s] error: %s", instanceID, bindingID, err)
 				continue
 			}
 
@@ -183,12 +183,12 @@ func (vault *VaultBroker) Scan() error {
 		}
 	}
 
-	log.Printf("[scan] found %d tokens to renew", len(vault.Tokens))
+	log.Infof("[scan] found %d tokens to renew", len(vault.Tokens))
 	return nil
 }
 
 func (vault *VaultBroker) RenewTokens(interval int) {
-	log.Printf("[renew] tokens will be renewed every %d minutes...", interval)
+	log.Infof("[renew] tokens will be renewed every %d minutes...", interval)
 	t := time.Tick(time.Duration(interval) * time.Minute)
 	vault.RenewOnce()
 
@@ -204,19 +204,19 @@ func (vault *VaultBroker) RenewOnce() {
 	for token := range vault.Tokens {
 		res, err := vault.Do("POST", fmt.Sprintf("/v1/auth/token/renew/%s", token), nil)
 		if err != nil {
-			log.Printf("[renew %s] error: %s", token, err)
+			log.Errorf("[renew %s] error: %s", token, err)
 			continue
 		}
 		if res.StatusCode != 200 {
-			log.Printf("[renew %s] error: received %s from Vault", token, res.Status)
+			log.Errorf("[renew %s] error: received %s from Vault", token, res.Status)
 			continue
 		}
-		log.Printf("[renew %s] renewed token successfully.", token)
+		log.Infof("[renew %s] renewed token successfully.", token)
 	}
 }
 
 func (vault *VaultBroker) Services() []brokerapi.Service {
-	log.Printf("[catalog] returning service catalog")
+	log.Infof("[catalog] returning service catalog")
 	return []brokerapi.Service{
 		brokerapi.Service{
 			ID:            BrokerGUID,
@@ -240,9 +240,9 @@ func (vault *VaultBroker) Services() []brokerapi.Service {
 func (vault *VaultBroker) Provision(instanceID string, details brokerapi.ProvisionDetails, asyncAllowed bool) (brokerapi.ProvisionedServiceSpec, error) {
 	spec := brokerapi.ProvisionedServiceSpec{IsAsync: false}
 
-	log.Printf("[provision %s] provisioning new service", instanceID)
-	log.Printf("[provision %s] using vault at %s", instanceID, BackendURL)
-	log.Printf("[provision %s] creating new policy for access to secret/%s", instanceID, instanceID)
+	log.Infof("[provision %s] provisioning new service", instanceID)
+	log.Infof("[provision %s] using vault at %s", instanceID, BackendURL)
+	log.Infof("[provision %s] creating new policy for access to secret/%s", instanceID, instanceID)
 	res, err := vault.Do("PUT", fmt.Sprintf("/v1/sys/policy/%s", instanceID),
 		PolicyCreateRequest{
 			Rules: fmt.Sprintf(`
@@ -255,15 +255,15 @@ path "secret/%s/*" {
 		},
 	)
 	if err != nil {
-		log.Printf("[provision %s] error: %s", instanceID, err)
+		log.Errorf("[provision %s] error: %s", instanceID, err)
 		return spec, err
 	}
 	if res.StatusCode != 204 && res.StatusCode != 200 {
-		log.Printf("[provision %s] error: vault returned a %s", instanceID, res.Status)
+		log.Errorf("[provision %s] error: vault returned a %s", instanceID, res.Status)
 		return spec, fmt.Errorf("Received %s from Vault", res.Status)
 	}
 
-	log.Printf("[provision %s] success", instanceID)
+	log.Infof("[provision %s] success", instanceID)
 	return spec, nil
 }
 
@@ -272,29 +272,29 @@ func (vault *VaultBroker) LastOperation(instanceID string) (brokerapi.LastOperat
 }
 
 func (vault *VaultBroker) Deprovision(instanceID string, details brokerapi.DeprovisionDetails, asyncAllowed bool) (brokerapi.IsAsync, error) {
-	log.Printf("[deprovision %s] removing policy for secret/%s", instanceID, instanceID)
-	log.Printf("[deprovision %s] using vault at %s", instanceID, BackendURL)
+	log.Infof("[deprovision %s] removing policy for secret/%s", instanceID, instanceID)
+	log.Infof("[deprovision %s] using vault at %s", instanceID, BackendURL)
 	res, err := vault.Do("DELETE", fmt.Sprintf("/v1/sys/policy/%s", instanceID), nil)
 	if err != nil {
-		log.Printf("[deprovision %s] error: %s", instanceID, err)
+		log.Errorf("[deprovision %s] error: %s", instanceID, err)
 		return false, err
 	}
 	if res.StatusCode != 204 {
-		log.Printf("[deprovision %s] error: vault returned a %s", instanceID, res.Status)
+		log.Errorf("[deprovision %s] error: vault returned a %s", instanceID, res.Status)
 		return false, fmt.Errorf("Received %s from Vault", res.Status)
 	}
 
 	var rm func(string)
 	rm = func(path string) {
-		log.Printf("[deprovision %s] removing secret at %s", instanceID, path)
+		log.Infof("[deprovision %s] removing secret at %s", instanceID, path)
 		_, err := vault.Do("DELETE", path, nil)
 		if err != nil {
-			log.Printf("[deprovision %s] unable to delete %s: %s", instanceID, path, err)
+			log.Errorf("[deprovision %s] unable to delete %s: %s", instanceID, path, err)
 		}
 
 		keys, err := vault.List(path)
 		if err != nil {
-			log.Printf("[deprovision %s] unable to list %s: %s", instanceID, path, err)
+			log.Errorf("[deprovision %s] unable to list %s: %s", instanceID, path, err)
 			return
 		}
 
@@ -302,19 +302,19 @@ func (vault *VaultBroker) Deprovision(instanceID string, details brokerapi.Depro
 			rm(fmt.Sprintf("%s/%s", path, strings.TrimSuffix(sub, "/")))
 		}
 	}
-	log.Printf("[deprovision %s] clearing out secrets", instanceID)
+	log.Infof("[deprovision %s] clearing out secrets", instanceID)
 	rm(fmt.Sprintf("/v1/secret/%s", instanceID))
 
-	log.Printf("[deprovision %s] success", instanceID)
+	log.Infof("[deprovision %s] success", instanceID)
 	return false, nil
 }
 
 func (vault *VaultBroker) Bind(instanceID, bindingID string, details brokerapi.BindDetails) (brokerapi.Binding, error) {
 	var binding brokerapi.Binding
 
-	log.Printf("[bind %s / %s] binding service", instanceID, bindingID)
-	log.Printf("[bind %s / %s] using vault at %s", instanceID, bindingID, BackendURL)
-	log.Printf("[bind %s / %s] generating new access token for bound application", instanceID, bindingID)
+	log.Infof("[bind %s / %s] binding service", instanceID, bindingID)
+	log.Infof("[bind %s / %s] using vault at %s", instanceID, bindingID, BackendURL)
+	log.Infof("[bind %s / %s] generating new access token for bound application", instanceID, bindingID)
 	token := uuid.NewRandom().String()
 	res, err := vault.Do("POST", "/v1/auth/token/create",
 		TokenCreateRequest{
@@ -325,26 +325,26 @@ func (vault *VaultBroker) Bind(instanceID, bindingID string, details brokerapi.B
 			NoDefaultPolicy: true,
 		})
 	if err != nil {
-		log.Printf("[bind %s / %s] error: %s", instanceID, bindingID, err)
+		log.Errorf("[bind %s / %s] error: %s", instanceID, bindingID, err)
 		return binding, err
 	}
 	if res.StatusCode != 200 {
-		log.Printf("[bind %s / %s] error: vault returned a %s", instanceID, bindingID, res.Status)
+		log.Errorf("[bind %s / %s] error: vault returned a %s", instanceID, bindingID, res.Status)
 		return binding, fmt.Errorf("Received %s from Vault", res.Status)
 	}
 
 	/* store the instance / binding ID in Vault */
-	log.Printf("[bind %s / %s] saving accounting records", instanceID, bindingID)
+	log.Infof("[bind %s / %s] saving accounting records", instanceID, bindingID)
 	res, err = vault.Do("POST",
 		fmt.Sprintf("/v1/secret/acct/%s/%s", instanceID, bindingID),
 		map[string]string{"token": token},
 	)
 	if err != nil {
-		log.Printf("[bind %s / %s] error: %s", instanceID, bindingID, err)
+		log.Errorf("[bind %s / %s] error: %s", instanceID, bindingID, err)
 		return binding, err
 	}
 	if res.StatusCode != 204 {
-		log.Printf("[bind %s / %s] error: vault returned a %s", instanceID, bindingID, res.Status)
+		log.Errorf("[bind %s / %s] error: vault returned a %s", instanceID, bindingID, res.Status)
 		return binding, fmt.Errorf("Received %s from Vault", res.Status)
 	}
 
@@ -352,7 +352,7 @@ func (vault *VaultBroker) Bind(instanceID, bindingID string, details brokerapi.B
 	vault.Tokens[token] = true
 	vault.Lock.Unlock()
 
-	log.Printf("[bind %s / %s] success", instanceID, bindingID)
+	log.Infof("[bind %s / %s] success", instanceID, bindingID)
 	binding.Credentials = Credentials{
 		Vault: BackendPublic,
 		Token: token,
@@ -362,50 +362,50 @@ func (vault *VaultBroker) Bind(instanceID, bindingID string, details brokerapi.B
 }
 
 func (vault *VaultBroker) Unbind(instanceID, bindingID string, details brokerapi.UnbindDetails) error {
-	log.Printf("[unbind %s / %s] unbinding service", instanceID, bindingID)
-	log.Printf("[unbind %s / %s] using vault at %s", instanceID, bindingID, BackendURL)
-	log.Printf("[unbind %s / %s] retrieving access token", instanceID, bindingID)
+	log.Infof("[unbind %s / %s] unbinding service", instanceID, bindingID)
+	log.Infof("[unbind %s / %s] using vault at %s", instanceID, bindingID, BackendURL)
+	log.Infof("[unbind %s / %s] retrieving access token", instanceID, bindingID)
 	res, err := vault.Do("GET",
 		fmt.Sprintf("/v1/secret/acct/%s/%s", instanceID, bindingID), nil)
 	if err != nil {
-		log.Printf("[unbind %s / %s] error: %s", instanceID, bindingID, err)
+		log.Errorf("[unbind %s / %s] error: %s", instanceID, bindingID, err)
 		return err
 	}
 	if res.StatusCode != 200 {
-		log.Printf("[unbind %s / %s] error: vault returned a %s", instanceID, bindingID, res.Status)
+		log.Errorf("[unbind %s / %s] error: vault returned a %s", instanceID, bindingID, res.Status)
 		return fmt.Errorf("Received %s from Vault", res.Status)
 	}
 
 	secret, err := ReadSecret(res.Body)
 	if err != nil {
-		log.Printf("[unbind %s / %s] error: %s", instanceID, bindingID, err)
+		log.Errorf("[unbind %s / %s] error: %s", instanceID, bindingID, err)
 		return err
 	}
 	if _, ok := secret["token"]; !ok {
-		log.Printf("[unbind %s / %s] error: `token` key not found at secret/acct/%s/%s", instanceID, bindingID, instanceID, bindingID)
+		log.Errorf("[unbind %s / %s] error: `token` key not found at secret/acct/%s/%s", instanceID, bindingID, instanceID, bindingID)
 		return fmt.Errorf("No token found for given service bind (%s)", bindingID)
 	}
 
-	log.Printf("[unbind %s / %s] revoking token '%s'", instanceID, bindingID, secret["token"])
+	log.Infof("[unbind %s / %s] revoking token '%s'", instanceID, bindingID, secret["token"])
 	res, err = vault.Do("PUT", "/v1/auth/token/revoke", map[string]string{"token": secret["token"]})
 	if err != nil {
-		log.Printf("[unbind %s / %s] error: %s", instanceID, bindingID, err)
+		log.Errorf("[unbind %s / %s] error: %s", instanceID, bindingID, err)
 		return err
 	}
 	if res.StatusCode != 204 {
-		log.Printf("[unbind %s / %s] error: vault returned a %s", instanceID, bindingID, res.Status)
+		log.Errorf("[unbind %s / %s] error: vault returned a %s", instanceID, bindingID, res.Status)
 		return fmt.Errorf("Received %s from Vault", res.Status)
 	}
 
-	log.Printf("[unbind %s / %s] removing accounting records", instanceID, bindingID)
+	log.Infof("[unbind %s / %s] removing accounting records", instanceID, bindingID)
 	res, err = vault.Do("DELETE",
 		fmt.Sprintf("/v1/secret/acct/%s/%s", instanceID, bindingID), nil)
 	if err != nil {
-		log.Printf("[unbind %s / %s] error: %s", instanceID, bindingID, err)
+		log.Errorf("[unbind %s / %s] error: %s", instanceID, bindingID, err)
 		return err
 	}
 	if res.StatusCode != 204 {
-		log.Printf("[unbind %s / %s] error: vault returned a %s", instanceID, bindingID, res.Status)
+		log.Errorf("[unbind %s / %s] error: vault returned a %s", instanceID, bindingID, res.Status)
 		return fmt.Errorf("Received %s from Vault", res.Status)
 	}
 
@@ -413,7 +413,7 @@ func (vault *VaultBroker) Unbind(instanceID, bindingID string, details brokerapi
 	delete(vault.Tokens, secret["token"])
 	vault.Lock.Unlock()
 
-	log.Printf("[unbind %s / %s] success", instanceID, bindingID)
+	log.Infof("[unbind %s / %s] success", instanceID, bindingID)
 	return nil
 }
 
@@ -490,6 +490,11 @@ func version() {
 
 func main() {
 	ok := true
+
+	log.SetupLogging(log.LogConfig{
+		Type:  "console",
+		Level: "info",
+	})
 
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -617,7 +622,7 @@ func main() {
 	vault.Scan()
 	go vault.RenewTokens(BackendRefresh)
 
-	log.Printf("Vault Service Broker listening on %s", bind)
+	log.Infof("Vault Service Broker listening on %s", bind)
 	http.Handle("/", brokerapi.New(
 		vault,
 		lager.NewLogger("vault-broker"),
