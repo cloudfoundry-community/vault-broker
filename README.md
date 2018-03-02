@@ -122,14 +122,14 @@ variables:
     `$VAULT_ADDR`, but can be set separately if you need or want
     applications to access the Vault via DNS, or over a load
     balancer.
-  - **VAULT_TOKEN** - The token that the service broker will use
+  - **$VAULT_TOKEN** - The token that the service broker will use
     when interacting with the Vault.  This variable is
     **required**, and you probably want to set it to a root token.
-  - **VAULT_SKIP_VERIFY** - Instructs the broker to ignore SSL/TLS
+  - **$VAULT_SKIP_VERIFY** - Instructs the broker to ignore SSL/TLS
     certificate problems (self-signedness, domain mismatch,
     expiration, etc.).  Set this at your own risk.  Note that this
     will not be propagated to bound applications.
-  - **VAULT_REFRESH_INTERVAL** - How often, in minutes, should the
+  - **$VAULT_REFRESH_INTERVAL** - How often, in minutes, should the
     broker renew tokens it has issued.  Defaults to 30 (minutes).
 
 
