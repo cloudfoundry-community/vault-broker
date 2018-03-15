@@ -522,6 +522,15 @@ Environment Variables:
 	os.Exit(rc)
 }
 
+func stringInSlice(a string, list []string) bool {
+	for _, b := range list {
+		if b == a {
+			return true
+		}
+	}
+	return false
+}
+
 func version() {
 	v := "(development version)"
 	if Version != "" {
@@ -613,6 +622,10 @@ func main() {
 	BackendURLs = strings.Split(strings.Replace(os.Getenv("VAULT_ADDRS"), " ", "", -1), ",")
 	if os.Getenv("VAULT_ADDRS") == "" {
 		BackendURLs = []string{BackendURL}
+	}
+
+	if !stringInSlice(BackendURL, BackendURLs) {
+		BackendURLs = append([]string{BackendURL}, BackendURLs...)
 	}
 
 	BackendPublicIPs = strings.Split(strings.Replace(os.Getenv("VAULT_ADVERTISE_ADDRS"), " ", "", -1), ",")
