@@ -13,10 +13,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jhunt/go-log"
 	"github.com/pborman/uuid"
 	"github.com/pivotal-cf/brokerapi"
 	"github.com/pivotal-golang/lager"
-	"github.com/jhunt/go-log"
 )
 
 var (
@@ -31,19 +31,24 @@ var (
 	AuthUsername string
 	AuthPassword string
 
-	BackendURL      string
-	BackendPublic   string
-	BackendToken    string
-	BackendInsecure bool
-	BackendRefresh  int
+	BackendURL       string
+	BackendURLs      []string
+	BackendPublic    string
+	BackendPublicIPs []string
+	BackendToken     string
+	BackendInsecure  bool
+	BackendRefresh   int
+
+	BackendHealth sync.Map
 
 	Version string
 )
 
 type Credentials struct {
-	Vault string `json:"vault"`
-	Token string `json:"token"`
-	Root  string `json:"root"`
+	Vault  string   `json:"vault"`
+	Vaults []string `json:"vaults"`
+	Token  string   `json:"token"`
+	Root   string   `json:"root"`
 }
 
 func ReadSecret(in io.Reader) (map[string]string, error) {
@@ -88,20 +93,28 @@ func (vault *VaultBroker) NewRequest(method, url string, data interface{}) (*htt
 }
 
 func (vault *VaultBroker) Do(method, url string, data interface{}) (*http.Response, error) {
-	req, err := vault.NewRequest(method, fmt.Sprintf("%s%s", BackendURL, url), data)
-	if err != nil {
-		return nil, err
-	}
+	for _, backend := range BackendURLs {
+		currentStatus, ok := BackendHealth.Load(backend)
+		if !ok || currentStatus.(bool) != true {
+			continue
+		}
+		log.Infof("[request %s] using vault at %s", url, backend)
+		req, err := vault.NewRequest(method, fmt.Sprintf("%s%s", backend, url), data)
+		if err != nil {
+			return nil, err
+		}
 
-	req.Header.Add("X-Vault-Token", BackendToken)
-	res, err := vault.HTTP.Do(req)
-	if err != nil {
-		return res, fmt.Errorf("Failed to interact with Vault: %s", err)
+		req.Header.Add("X-Vault-Token", BackendToken)
+		res, err := vault.HTTP.Do(req)
+		if err != nil {
+			log.Errorf("Failed to interact with Vault at %s: %s", backend, err)
+		} else if res.StatusCode == 503 {
+			log.Errorf("Vault is sealed (HTTP 503)")
+		} else {
+			return res, nil
+		}
 	}
-	if res.StatusCode == 503 {
-		return res, fmt.Errorf("Vault is sealed (HTTP 503)")
-	}
-	return res, nil
+	return nil, fmt.Errorf("Could not contact or errored contacting all vaults. Check log for details")
 }
 
 func (vault *VaultBroker) List(path string) ([]string, error) {
@@ -354,9 +367,10 @@ func (vault *VaultBroker) Bind(instanceID, bindingID string, details brokerapi.B
 
 	log.Infof("[bind %s / %s] success", instanceID, bindingID)
 	binding.Credentials = Credentials{
-		Vault: BackendPublic,
-		Token: token,
-		Root:  fmt.Sprintf("secret/%s", instanceID),
+		Vault:  BackendPublic,
+		Vaults: BackendPublicIPs,
+		Token:  token,
+		Root:   fmt.Sprintf("secret/%s", instanceID),
 	}
 	return binding, nil
 }
@@ -422,6 +436,34 @@ func (vault *VaultBroker) Update(instanceID string, details brokerapi.UpdateDeta
 	return false, fmt.Errorf("not implemented")
 }
 
+func (vault *VaultBroker) HealthCheck() {
+	log.Infof("[health] health will be performed every 30 seconds...")
+	t := time.Tick(time.Duration(30) * time.Second)
+	vault.checkBackendHealth()
+
+	for _ = range t {
+		vault.checkBackendHealth()
+	}
+}
+
+func (vault *VaultBroker) checkBackendHealth() {
+	for _, backend := range BackendURLs {
+		currentStatus, ok := BackendHealth.Load(backend)
+		if !ok {
+			log.Errorf("[health] Backend %s not found in health map...skipping", backend)
+		}
+		healthy := true
+		res, err := vault.HTTP.Get(fmt.Sprintf("%s%s", backend, "/v1/sys/health?standbyok=true"))
+		if err != nil || res.StatusCode != 200 {
+			healthy = false
+		}
+		if currentStatus.(bool) != healthy {
+			log.Warnf("[health] Vault at %s is now marked as healthy:%t", backend, healthy)
+			BackendHealth.Store(backend, healthy)
+		}
+	}
+}
+
 func usage(rc int) {
 	version()
 	fmt.Printf(`USAGE: vault-broker [-h|-v]
@@ -478,6 +520,15 @@ Environment Variables:
                  the time (in minutes) between refresh attempts.
 `)
 	os.Exit(rc)
+}
+
+func stringInSlice(a string, list []string) bool {
+	for _, b := range list {
+		if b == a {
+			return true
+		}
+	}
+	return false
 }
 
 func version() {
@@ -562,9 +613,29 @@ func main() {
 		fmt.Fprintf(os.Stderr, "No VAULT_ADDR environment variable set!\n")
 		ok = false
 	}
+
 	BackendPublic = os.Getenv("VAULT_ADVERTISE_ADDR")
 	if BackendPublic == "" {
 		BackendPublic = BackendURL
+	}
+
+	BackendURLs = strings.Split(strings.Replace(os.Getenv("VAULT_ADDRS"), " ", "", -1), ",")
+	if os.Getenv("VAULT_ADDRS") == "" {
+		BackendURLs = []string{BackendURL}
+	}
+
+	if !stringInSlice(BackendURL, BackendURLs) {
+		BackendURLs = append([]string{BackendURL}, BackendURLs...)
+	}
+
+	BackendPublicIPs = strings.Split(strings.Replace(os.Getenv("VAULT_ADVERTISE_ADDRS"), " ", "", -1), ",")
+	if os.Getenv("VAULT_ADVERTISE_ADDRS") == "" {
+		BackendPublicIPs = BackendURLs
+	}
+
+	// Initialize map of backend health to initially be true
+	for i := 0; i < len(BackendURLs); i++ {
+		BackendHealth.Store(BackendURLs[i], true)
 	}
 
 	BackendToken = os.Getenv("VAULT_TOKEN")
@@ -593,6 +664,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	log.Infof("BackendURL: %s - BackendURLs: %v - BackendPublic: %s - BackendPublicIPs: %v", BackendURL, BackendURLs, BackendPublic, BackendPublicIPs)
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "3000"
@@ -619,9 +692,9 @@ func main() {
 		Tokens: make(map[string]bool),
 	}
 
+	go vault.HealthCheck()
 	vault.Scan()
 	go vault.RenewTokens(BackendRefresh)
-
 	log.Infof("Vault Service Broker listening on %s", bind)
 	http.Handle("/", brokerapi.New(
 		vault,

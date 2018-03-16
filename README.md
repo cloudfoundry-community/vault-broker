@@ -81,6 +81,8 @@ assigns it a _binding ID_.  Let's assume that that binding ID is
    - **token** - The access token ("flibbertygibbet")
    - **vault** - The URL to the Vault (see `$VAULT_ADVERTISE_ADDR`,
      in the _Configuration_ section)
+   - **vaults** - The Vault URLs used for HA (see `$VAULT_ADVERTISE_ADDR`,
+     in the _Configuration_ section)
    - **root**  - The root path under which to create secrets.  In
      this example, that will be `secret/1234`
 4. Record the token in an accounting record, at
@@ -122,6 +124,18 @@ variables:
     `$VAULT_ADDR`, but can be set separately if you need or want
     applications to access the Vault via DNS, or over a load
     balancer.
+  - **$VAULT_ADDRS** - The addresses to use when accessing the Vault
+    to set up new policies and manage provisioned services.  This
+    variable is **required** for HA. If the first address in the list
+    is unavailable, the broker will failover to the other vaults in
+    the list for token renewel/issuing/etc. (Note: the application 
+    bound to the broker must also be configured to fail over to the 
+    other addresses in the list)
+  - **$VAULT_ADVERTISE_ADDRS** - The addresses to hand out to bound
+    applications, along with their credentials.  This defaults to
+    `$VAULT_ADDRS`, but can be set separately if you need or want
+    applications to access Vaults via DNS, or over load
+    balancers.
   - **$VAULT_TOKEN** - The token that the service broker will use
     when interacting with the Vault.  This variable is
     **required**, and you probably want to set it to a root token.

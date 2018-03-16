@@ -1,0 +1,8 @@
+---
+applications:
+  - name: vault-broker
+    buildpack: go_buildpack
+    command: vault-broker
+    env:
+      GOVERSION: go1.9
+      GOPACKAGENAME: github.com/cloudfoundry-community/vault-broker

@@ -3,7 +3,7 @@ build:
 
 test:
 	./t/basic
-
+	./t/basic-ha
 push:
 	cf push vault-broker -m 128M -k 256M --no-start
 	cf set-env vault-broker VAULT_ADDR "$(VAULT_ADDR)"
