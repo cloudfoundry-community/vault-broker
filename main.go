@@ -450,7 +450,7 @@ func (vault *VaultBroker) checkBackendHealth() {
 	for _, backend := range BackendURLs {
 		currentStatus, ok := BackendHealth.Load(backend)
 		if !ok {
-			log.Errorf("[health] Backend %s not found in health map...skipping")
+			log.Errorf("[health] Backend %s not found in health map...skipping", backend)
 		}
 		healthy := true
 		res, err := vault.HTTP.Get(fmt.Sprintf("%s%s", backend, "/v1/sys/health?standbyok=true"))
